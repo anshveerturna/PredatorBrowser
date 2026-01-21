@@ -1,0 +1,32 @@
+# Predator Browser - Enterprise Agentic Browser Module
+# Python 3.11+ required
+
+# Core dependencies
+playwright>=1.40.0
+mcp>=1.0.0
+
+# LLM Integration
+openai>=1.12.0
+langchain>=0.1.0
+langchain-openai>=0.0.5
+
+# Image Processing
+Pillow>=10.0.0
+
+# Async utilities
+aiohttp>=3.9.0
+asyncio-throttle>=1.0.0
+
+# Type checking and validation
+pydantic>=2.5.0
+
+# Logging and debugging
+structlog>=24.1.0
+rich>=13.7.0
+
+# Development dependencies (optional)
+# pytest>=8.0.0
+# pytest-asyncio>=0.23.0
+# mypy>=1.8.0
+# black>=24.1.0
+# ruff>=0.1.0

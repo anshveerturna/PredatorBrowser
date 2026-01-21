@@ -1,0 +1,71 @@
+# Predator Browser - Docker Compose Configuration
+# For development and testing
+
+version: '3.8'
+
+services:
+  predator-browser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: predator-browser
+    environment:
+      # Required: OpenAI API Key
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      
+      # Browser configuration
+      - PREDATOR_HEADLESS=true
+      - PREDATOR_STEALTH=true
+      - PREDATOR_VIEWPORT_WIDTH=1920
+      - PREDATOR_VIEWPORT_HEIGHT=1080
+      
+      # LLM Models
+      - PREDATOR_ROUTER_MODEL=gpt-4o-mini
+      - PREDATOR_VISION_MODEL=gpt-4o
+    
+    # For debugging, you can enable a VNC viewer
+    # ports:
+    #   - "5900:5900"
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
+          cpus: '1'
+    
+    # Shared memory for Chromium
+    shm_size: 1gb
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    
+    # Read-only filesystem (optional, for security)
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
+    
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.core.predator import PredatorBrowser; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Redis for session persistence (future feature)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: predator-redis
+  #   restart: unless-stopped
+  #   volumes:
+  #     - redis_data:/data
+
+# volumes:
+#   redis_data:

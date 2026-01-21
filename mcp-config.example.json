@@ -1,0 +1,16 @@
+{
+    "mcpServers": {
+        "predator-browser": {
+            "command": "python",
+            "args": ["-m", "app.server"],
+            "cwd": "/path/to/PredatorBrowser",
+            "env": {
+                "OPENAI_API_KEY": "your-api-key-here",
+                "PREDATOR_HEADLESS": "true",
+                "PREDATOR_STEALTH": "true",
+                "PREDATOR_ROUTER_MODEL": "gpt-4o-mini",
+                "PREDATOR_VISION_MODEL": "gpt-4o"
+            }
+        }
+    }
+}
