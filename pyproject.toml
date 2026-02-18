@@ -50,6 +50,9 @@ dev = [
 
 [project.scripts]
 predator-server = "app.server:run"
+predator-server-v2 = "app.server_v2:run"
+predator-temporal-worker-v2 = "app.temporal_worker_v2:run"
+predator-load-harness-v2 = "app.core.v2.load_harness:run"
 
 [project.urls]
 Homepage = "https://github.com/predator-browser/predator"

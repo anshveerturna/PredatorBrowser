@@ -260,3 +260,27 @@ MIT License - See LICENSE file for details.
 ## Contributing
 
 Contributions are welcome! Please read the contributing guidelines first.
+
+## Predator v2 (Deterministic Core)
+
+This repository now includes a `v2` execution stack under `app/core/v2` with:
+
+- deterministic `ActionContract` and stable `action_id`
+- event-driven `WaitManager` (no fixed sleeps)
+- bounded `StructuredStateExtractor` (no full HTML model payload)
+- `DeltaStateTracker` for compact state diffs
+- typed `VerificationEngine`
+- passive `NetworkObserver` with failure and silent-error signals
+- workflow-scoped `SessionManager` and `SecurityLayer`
+- artifact hashing/lifecycle via `ArtifactManager`
+- immutable hash-chained audit logging via `AuditTrail`
+- signed audit records (HMAC) + chain verification
+- tenant quotas + domain circuit breaker + runtime health snapshot
+- shared SQLite control-plane state for multi-process coordination
+- hard token-budget enforcement via `TokenBudgetManager`
+- prompt-injection filtering on model-visible extracted text
+- `PredatorTemporalActivity` adapter for Temporal Activity execution
+- dedicated v2 MCP server: `python -m app.server_v2`
+- optional Temporal worker entrypoint: `python -m app.temporal_worker_v2`
+
+See `docs/predator_v2.md` for module boundaries and Temporal integration notes.
