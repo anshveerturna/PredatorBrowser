@@ -110,14 +110,69 @@ STEALTH_HEADERS = {
 EXTRACT_ELEMENTS_JS = """
 () => {
     const INTERACTIVE = 'a, button, input, select, textarea, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], [role="combobox"], [role="searchbox"], [role="textbox"], [onclick], [tabindex]';
-    const results = [];
-    let id = 1;
-    for (const el of document.querySelectorAll(INTERACTIVE)) {
+    const MAX_ELEMENTS = 80;
+
+    // --- Overlay / Modal Detection ---
+    const OVERLAY_SELECTORS = [
+        '[role="dialog"]', '[role="alertdialog"]', '[aria-modal="true"]',
+        '.modal', '.popup', '.overlay', '.lightbox',
+        '[class*="modal"]', '[class*="popup"]', '[class*="overlay"]',
+        '[id*="modal"]', '[id*="popup"]', '[id*="overlay"]',
+    ];
+
+    function isOverlayContainer(el) {
+        const style = window.getComputedStyle(el);
+        const pos = style.position;
+        const zIndex = parseInt(style.zIndex, 10) || 0;
+        const isFixedOrAbsolute = (pos === 'fixed' || pos === 'absolute');
+        const hasHighZ = zIndex > 100;
+        const rect = el.getBoundingClientRect();
+        const coversSignificantArea = rect.width > window.innerWidth * 0.2
+                                   && rect.height > window.innerHeight * 0.15;
+        // An overlay is fixed/absolute with high z-index covering a significant area
+        if (isFixedOrAbsolute && hasHighZ && coversSignificantArea) return true;
+        // Or matches known modal selectors
+        for (const sel of OVERLAY_SELECTORS) {
+            try { if (el.matches(sel)) return true; } catch(e) {}
+        }
+        return false;
+    }
+
+    // Find all overlay containers currently visible
+    const overlayContainers = [];
+    const allElements = document.querySelectorAll('*');
+    for (const el of allElements) {
+        if (el === document.body || el === document.documentElement) continue;
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) continue;
+        if (isOverlayContainer(el)) {
+            overlayContainers.push(el);
+        }
+    }
+
+    const overlayDetected = overlayContainers.length > 0;
+    let overlayReason = '';
+    if (overlayDetected) {
+        const oc = overlayContainers[0];
+        const cls = oc.className?.toString().substring(0, 60) || '';
+        const id = oc.id || '';
+        const role = oc.getAttribute('role') || '';
+        overlayReason = `tag=${oc.tagName}, id=${id}, class=${cls}, role=${role}`;
+    }
+
+    function isInsideOverlay(el) {
+        for (const oc of overlayContainers) {
+            if (oc.contains(el)) return true;
+        }
+        return false;
+    }
+
+    function extractElement(el, elementId, inOverlay) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return null;
         const visible = rect.top < window.innerHeight && rect.bottom > 0
                      && rect.left < window.innerWidth && rect.right > 0;
-        if (!visible) continue;
+        if (!visible) return null;
         const tag = el.tagName.toLowerCase();
         const role = el.getAttribute('role') || tag;
         let name = el.getAttribute('aria-label')
@@ -125,12 +180,13 @@ EXTRACT_ELEMENTS_JS = """
                 || el.getAttribute('alt')
                 || el.getAttribute('placeholder')
                 || el.innerText?.trim().substring(0, 80)
+                || el.value?.trim().substring(0, 80)
                 || el.getAttribute('name')
                 || el.getAttribute('id')
                 || '';
         name = name.replace(/\\s+/g, ' ').trim().substring(0, 100);
         const entry = {
-            id: id++,
+            id: elementId,
             tag: tag,
             role: role,
             name: name,
@@ -142,6 +198,7 @@ EXTRACT_ELEMENTS_JS = """
             },
             enabled: !el.disabled,
             visible: true,
+            in_overlay: inOverlay,
         };
         if (tag === 'input' || tag === 'textarea') {
             entry.type = el.type || 'text';
@@ -162,10 +219,49 @@ EXTRACT_ELEMENTS_JS = """
             entry.checked = el.checked || el.getAttribute('aria-checked') === 'true';
         }
         entry.focused = document.activeElement === el;
-        results.push(entry);
-        if (results.length >= 80) break;
+        return entry;
     }
-    return results;
+
+    // --- Two-Pass Extraction ---
+    const results = [];
+    let id = 1;
+    const processedEls = new Set();
+
+    // Pass 1: Overlay elements first (up to 30 slots reserved)
+    if (overlayDetected) {
+        for (const oc of overlayContainers) {
+            for (const el of oc.querySelectorAll(INTERACTIVE)) {
+                if (processedEls.has(el)) continue;
+                const entry = extractElement(el, id, true);
+                if (entry) {
+                    results.push(entry);
+                    processedEls.add(el);
+                    id++;
+                }
+                if (results.length >= 30) break;
+            }
+            if (results.length >= 30) break;
+        }
+    }
+
+    // Pass 2: Remaining page elements
+    const remainingSlots = MAX_ELEMENTS - results.length;
+    for (const el of document.querySelectorAll(INTERACTIVE)) {
+        if (processedEls.has(el)) continue;
+        const inOv = isInsideOverlay(el);
+        const entry = extractElement(el, id, inOv);
+        if (entry) {
+            results.push(entry);
+            id++;
+        }
+        if (results.length >= MAX_ELEMENTS) break;
+    }
+
+    return {
+        elements: results,
+        overlay_detected: overlayDetected,
+        overlay_reason: overlayReason,
+    };
 }
 """
 
@@ -472,7 +568,10 @@ class AgentBrowser:
         Returns: url, title, interactive elements with bounding boxes,
         scroll position, and condensed visible text.
         """
-        elements = await self.page.evaluate(EXTRACT_ELEMENTS_JS)
+        extraction = await self.page.evaluate(EXTRACT_ELEMENTS_JS)
+        elements = extraction.get("elements", []) if isinstance(extraction, dict) else extraction
+        overlay_detected = extraction.get("overlay_detected", False) if isinstance(extraction, dict) else False
+        overlay_reason = extraction.get("overlay_reason", "") if isinstance(extraction, dict) else ""
         scroll = await self.page.evaluate(GET_SCROLL_INFO_JS)
         text = await self.page.evaluate(GET_PAGE_TEXT_JS, 3000)
 
@@ -483,6 +582,8 @@ class AgentBrowser:
             "scroll": scroll,
             "elements": elements,
             "element_count": len(elements),
+            "overlay_detected": overlay_detected,
+            "overlay_reason": overlay_reason,
             "page_text": text,
         }
 
@@ -597,7 +698,8 @@ class AgentBrowser:
         """Select an option from a <select> dropdown."""
         try:
             if element_id is not None:
-                elements = await self.page.evaluate(EXTRACT_ELEMENTS_JS)
+                extraction = await self.page.evaluate(EXTRACT_ELEMENTS_JS)
+                elements = extraction.get("elements", []) if isinstance(extraction, dict) else extraction
                 elem = next((e for e in elements if e["id"] == element_id), None)
                 if not elem:
                     return {"success": False, "error": f"Element {element_id} not found"}
@@ -728,5 +830,6 @@ class AgentBrowser:
 
     async def _resolve_element(self, element_id: int) -> dict[str, Any] | None:
         """Re-extract elements and find by ID."""
-        elements = await self.page.evaluate(EXTRACT_ELEMENTS_JS)
+        extraction = await self.page.evaluate(EXTRACT_ELEMENTS_JS)
+        elements = extraction.get("elements", []) if isinstance(extraction, dict) else extraction
         return next((e for e in elements if e["id"] == element_id), None)
