@@ -10,7 +10,13 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from app.core.v2 import PredatorEngineV2, SecurityPolicy
+from app.core.v2 import (
+    ClusterSchedulerConfig,
+    NodeAdmissionSLO,
+    PredatorEngineV2,
+    PredatorShardedCluster,
+    SecurityPolicy,
+)
 from app.core.v2.contracts import (
     ActionContract,
     ActionSpec,
@@ -119,12 +125,38 @@ async def run_worker(config: WorkerConfig) -> None:
     if Client is None or Worker is None:
         raise RuntimeError("temporalio is not installed. Install temporalio to run Predator v2 worker.")
 
-    engine = PredatorEngineV2(
-        audit_root_dir=os.getenv("PREDATOR_V2_AUDIT_DIR", "/tmp/predator-audit"),
-        artifact_root_dir=os.getenv("PREDATOR_V2_ARTIFACT_DIR", "/tmp/predator-artifacts"),
-        control_db_path=os.getenv("PREDATOR_V2_CONTROL_DB", "/tmp/predator-control-plane/control.db"),
-        telemetry_dir=os.getenv("PREDATOR_V2_TELEMETRY_DIR", "/tmp/predator-telemetry"),
-    )
+    shard_count = int(os.getenv("PREDATOR_V2_SHARDS", "1"))
+    if shard_count > 1:
+        scheduler = ClusterSchedulerConfig(
+            shard_count=shard_count,
+            dispatch_interval_ms=int(os.getenv("PREDATOR_V2_DISPATCH_INTERVAL_MS", "20")),
+            monitor_interval_ms=int(os.getenv("PREDATOR_V2_MONITOR_INTERVAL_MS", "250")),
+            light_weight=int(os.getenv("PREDATOR_V2_LIGHT_WEIGHT", "3")),
+            heavy_weight=int(os.getenv("PREDATOR_V2_HEAVY_WEIGHT", "1")),
+        )
+        slo = NodeAdmissionSLO(
+            max_active_sessions=int(os.getenv("PREDATOR_V2_SLO_MAX_ACTIVE_SESSIONS", "120")),
+            max_inflight_actions=int(os.getenv("PREDATOR_V2_SLO_MAX_INFLIGHT_ACTIONS", "120")),
+            max_loop_lag_p95_ms=float(os.getenv("PREDATOR_V2_SLO_MAX_LOOP_LAG_MS", "1200")),
+            max_fd_count=int(os.getenv("PREDATOR_V2_SLO_MAX_FD", "1024")),
+            max_rss_mb=float(os.getenv("PREDATOR_V2_SLO_MAX_RSS_MB", "1024")),
+            max_breaker_open_ratio=float(os.getenv("PREDATOR_V2_SLO_MAX_BREAKER_RATIO", "0.5")),
+        )
+        engine: PredatorEngineV2 | PredatorShardedCluster = PredatorShardedCluster(
+            scheduler=scheduler,
+            slo=slo,
+            audit_root_dir=os.getenv("PREDATOR_V2_AUDIT_DIR", "/tmp/predator-audit"),
+            artifact_root_dir=os.getenv("PREDATOR_V2_ARTIFACT_DIR", "/tmp/predator-artifacts"),
+            control_db_path=os.getenv("PREDATOR_V2_CONTROL_DB", "/tmp/predator-control-plane/control.db"),
+            telemetry_dir=os.getenv("PREDATOR_V2_TELEMETRY_DIR", "/tmp/predator-telemetry"),
+        )
+    else:
+        engine = PredatorEngineV2(
+            audit_root_dir=os.getenv("PREDATOR_V2_AUDIT_DIR", "/tmp/predator-audit"),
+            artifact_root_dir=os.getenv("PREDATOR_V2_ARTIFACT_DIR", "/tmp/predator-artifacts"),
+            control_db_path=os.getenv("PREDATOR_V2_CONTROL_DB", "/tmp/predator-control-plane/control.db"),
+            telemetry_dir=os.getenv("PREDATOR_V2_TELEMETRY_DIR", "/tmp/predator-telemetry"),
+        )
     await engine.initialize()
 
     adapter = PredatorTemporalActivity(engine)

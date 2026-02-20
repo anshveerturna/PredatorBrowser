@@ -105,6 +105,9 @@ class StructuredStateExtractor:
             if (name) selectorHints.push(tag + '[name="' + name.replace(/"/g, '\\"') + '"]');
             const aria = el.getAttribute('aria-label');
             if (aria) selectorHints.push(tag + '[aria-label="' + aria.replace(/"/g, '\\"') + '"]');
+            if ((tag === 'a' || tag === 'button') && text) {
+              selectorHints.push(tag + ':has-text("' + text.slice(0, 60).replace(/"/g, '\\"') + '")');
+            }
 
             out.push({
               role,

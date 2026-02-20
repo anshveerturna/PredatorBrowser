@@ -27,6 +27,7 @@ class VerificationRuleType(str, Enum):
     FILE_EXISTS = "file_exists"
     URL_PATTERN = "url_pattern"
     INVARIANT = "invariant"
+    VISUAL_CHANGE = "visual_change"  # v3: pre/post screenshot diff
 
 
 class EscalationMode(str, Enum):

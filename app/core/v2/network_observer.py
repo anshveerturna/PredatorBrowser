@@ -167,6 +167,12 @@ class NetworkObserver:
     def _on_request_failed(self, request: Request) -> None:
         self._request_starts.pop(request, None)
         failure = request.failure
+        if isinstance(failure, dict):
+            error_signature = str(failure.get("errorText", "request_failed"))
+        elif isinstance(failure, str):
+            error_signature = failure
+        else:
+            error_signature = "request_failed"
         self._events.append(
             NetworkEvent(
                 seq=self._next_seq(),
@@ -175,7 +181,7 @@ class NetworkObserver:
                 method=request.method,
                 url=request.url,
                 route_key=self._route_key(request.url),
-                error_signature=(failure or {}).get("errorText", "request_failed"),
+                error_signature=error_signature,
             )
         )
 

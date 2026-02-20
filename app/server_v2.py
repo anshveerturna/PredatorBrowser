@@ -20,8 +20,12 @@ from app.core.v2 import (
     ActionContract,
     ActionSpec,
     ActionType,
+    ClusterSchedulerConfig,
+    NodeAdmissionSLO,
     PredatorEngineV2,
+    PredatorShardedCluster,
     SecurityPolicy,
+    SessionConfig,
     VerificationRule,
     VerificationRuleType,
     WaitCondition,
@@ -35,7 +39,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("predator.server.v2")
 
-_engine: PredatorEngineV2 | None = None
+_engine: PredatorEngineV2 | PredatorShardedCluster | None = None
 
 
 def _to_action_spec(payload: dict[str, Any]) -> ActionSpec:
@@ -102,15 +106,51 @@ def _to_policy(payload: dict[str, Any]) -> SecurityPolicy:
     )
 
 
-async def get_engine() -> PredatorEngineV2:
+async def get_engine() -> PredatorEngineV2 | PredatorShardedCluster:
     global _engine
     if _engine is None:
-        _engine = PredatorEngineV2(
-            audit_root_dir=os.getenv("PREDATOR_V2_AUDIT_DIR", "/tmp/predator-audit"),
-            artifact_root_dir=os.getenv("PREDATOR_V2_ARTIFACT_DIR", "/tmp/predator-artifacts"),
-            control_db_path=os.getenv("PREDATOR_V2_CONTROL_DB", "/tmp/predator-control-plane/control.db"),
-            telemetry_dir=os.getenv("PREDATOR_V2_TELEMETRY_DIR", "/tmp/predator-telemetry"),
+        headless_raw = os.getenv("PREDATOR_V2_HEADLESS", "1").strip().lower()
+        headless = headless_raw not in {"0", "false", "no", "off"}
+        session_config = SessionConfig(
+            headless=headless,
+            viewport_width=int(os.getenv("PREDATOR_V2_VIEWPORT_WIDTH", "1440")),
+            viewport_height=int(os.getenv("PREDATOR_V2_VIEWPORT_HEIGHT", "900")),
+            max_total_sessions=int(os.getenv("PREDATOR_V2_MAX_TOTAL_SESSIONS", "200")),
         )
+        shard_count = int(os.getenv("PREDATOR_V2_SHARDS", "1"))
+        if shard_count > 1:
+            scheduler = ClusterSchedulerConfig(
+                shard_count=shard_count,
+                dispatch_interval_ms=int(os.getenv("PREDATOR_V2_DISPATCH_INTERVAL_MS", "20")),
+                monitor_interval_ms=int(os.getenv("PREDATOR_V2_MONITOR_INTERVAL_MS", "250")),
+                light_weight=int(os.getenv("PREDATOR_V2_LIGHT_WEIGHT", "3")),
+                heavy_weight=int(os.getenv("PREDATOR_V2_HEAVY_WEIGHT", "1")),
+            )
+            slo = NodeAdmissionSLO(
+                max_active_sessions=int(os.getenv("PREDATOR_V2_SLO_MAX_ACTIVE_SESSIONS", "120")),
+                max_inflight_actions=int(os.getenv("PREDATOR_V2_SLO_MAX_INFLIGHT_ACTIONS", "120")),
+                max_loop_lag_p95_ms=float(os.getenv("PREDATOR_V2_SLO_MAX_LOOP_LAG_MS", "1200")),
+                max_fd_count=int(os.getenv("PREDATOR_V2_SLO_MAX_FD", "1024")),
+                max_rss_mb=float(os.getenv("PREDATOR_V2_SLO_MAX_RSS_MB", "1024")),
+                max_breaker_open_ratio=float(os.getenv("PREDATOR_V2_SLO_MAX_BREAKER_RATIO", "0.5")),
+            )
+            _engine = PredatorShardedCluster(
+                scheduler=scheduler,
+                slo=slo,
+                session_config=session_config,
+                audit_root_dir=os.getenv("PREDATOR_V2_AUDIT_DIR", "/tmp/predator-audit"),
+                artifact_root_dir=os.getenv("PREDATOR_V2_ARTIFACT_DIR", "/tmp/predator-artifacts"),
+                control_db_path=os.getenv("PREDATOR_V2_CONTROL_DB", "/tmp/predator-control-plane/control.db"),
+                telemetry_dir=os.getenv("PREDATOR_V2_TELEMETRY_DIR", "/tmp/predator-telemetry"),
+            )
+        else:
+            _engine = PredatorEngineV2(
+                session_config=session_config,
+                audit_root_dir=os.getenv("PREDATOR_V2_AUDIT_DIR", "/tmp/predator-audit"),
+                artifact_root_dir=os.getenv("PREDATOR_V2_ARTIFACT_DIR", "/tmp/predator-artifacts"),
+                control_db_path=os.getenv("PREDATOR_V2_CONTROL_DB", "/tmp/predator-control-plane/control.db"),
+                telemetry_dir=os.getenv("PREDATOR_V2_TELEMETRY_DIR", "/tmp/predator-telemetry"),
+            )
         await _engine.initialize()
     return _engine
 
@@ -170,6 +210,19 @@ async def list_tools() -> list[Tool]:
             name="v2_get_health",
             description="Get control-plane and circuit breaker health snapshot.",
             inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="v2_get_state",
+            description="Get bounded structured browser state for live model grounding.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tenant_id": {"type": "string"},
+                    "workflow_id": {"type": "string"},
+                    "policy": {"type": "object"},
+                },
+                "required": ["tenant_id", "workflow_id", "policy"],
+            },
         ),
         Tool(
             name="v2_open_tab",
@@ -241,6 +294,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
         if name == "v2_get_health":
             return [TextContent(type="text", text=json.dumps(engine.get_health(), indent=2))]
+
+        if name == "v2_get_state":
+            state = await engine.get_structured_state(
+                tenant_id=arguments["tenant_id"],
+                workflow_id=arguments["workflow_id"],
+                policy=_to_policy(arguments["policy"]),
+            )
+            return [TextContent(type="text", text=json.dumps(state, indent=2))]
 
         if name == "v2_open_tab":
             tab_id = await engine.open_tab(

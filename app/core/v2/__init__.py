@@ -14,6 +14,13 @@ from app.core.v2.contracts import (
     WaitCondition,
 )
 from app.core.v2.action_contract_validator import ActionContractValidator, ContractValidationDecision
+from app.core.v2.cluster import (
+    ClusterSchedulerConfig,
+    NodeAdmissionSLO,
+    PredatorShardedCluster,
+    WorkClass,
+    classify_work_class,
+)
 from app.core.v2.predator_v2 import PredatorEngineV2
 from app.core.v2.prompt_security import PromptInjectionFilter
 from app.core.v2.quota_manager import QuotaManager, TenantQuota
@@ -33,8 +40,11 @@ __all__ = [
     "EscalationMode",
     "EscalationPolicy",
     "ActionContractValidator",
+    "ClusterSchedulerConfig",
     "ContractValidationDecision",
+    "NodeAdmissionSLO",
     "PredatorEngineV2",
+    "PredatorShardedCluster",
     "ControlPlaneStore",
     "QuotaManager",
     "PromptInjectionFilter",
@@ -49,6 +59,8 @@ __all__ = [
     "NullTelemetrySink",
     "ComponentTokenBudgets",
     "ChaosPolicy",
+    "WorkClass",
+    "classify_work_class",
     "TimeoutPolicy",
     "VerificationRule",
     "VerificationRuleType",

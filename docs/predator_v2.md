@@ -32,6 +32,7 @@ This document defines the runtime boundaries for Predator v2.
 - `PromptInjectionFilter`: redacts instruction-like page text before model exposure.
 - `TelemetrySink`: structured event export (JSONL sink included by default).
 - `PredatorEngineV2`: Activity-facing orchestrator with idempotency + audit persistence.
+- `PredatorShardedCluster`: deterministic shard router + queue-aware scheduler + node SLO admission.
 
 ## Token Discipline
 
@@ -59,7 +60,35 @@ This document defines the runtime boundaries for Predator v2.
   - max step token budget
 - Circuit breaker blocks unstable domains after repeated failures and re-opens with half-open probing.
 
+## Horizontal Sharding
+
+- `PredatorShardedCluster` routes actions deterministically by `hash(tenant_id, workflow_id) % shard_count`.
+- Workflow affinity is pinned to a shard for session-local browser state continuity.
+- Queue scheduler is tenant-fair and work-class aware:
+  - per-tenant round-robin inside each shard queue
+  - weighted work classes (`light`/`heavy`) for head-of-line isolation
+- Per-node SLO admission gates dispatch:
+  - active session cap
+  - inflight action cap
+  - loop-lag p95 ceiling
+  - FD and RSS ceilings
+  - breaker-open ratio ceiling
+- Nodes that breach SLOs enter drain mode (`admit=false`) and only execute already-dispatched actions.
+
 ## Deployment Entry Points
 
 - MCP server for v2 runtime operations: `python -m app.server_v2`
 - Temporal worker adapter (optional `temporalio` dependency): `python -m app.temporal_worker_v2`
+
+### Sharded Mode Environment
+
+- `PREDATOR_V2_SHARDS` (default `1`): set `>1` to enable `PredatorShardedCluster` in MCP/Temporal entrypoints.
+- `PREDATOR_V2_DISPATCH_INTERVAL_MS` (default `20`)
+- `PREDATOR_V2_MONITOR_INTERVAL_MS` (default `250`)
+- `PREDATOR_V2_LIGHT_WEIGHT` / `PREDATOR_V2_HEAVY_WEIGHT` (default `3` / `1`)
+- `PREDATOR_V2_SLO_MAX_ACTIVE_SESSIONS` (default `120`)
+- `PREDATOR_V2_SLO_MAX_INFLIGHT_ACTIONS` (default `120`)
+- `PREDATOR_V2_SLO_MAX_LOOP_LAG_MS` (default `1200`)
+- `PREDATOR_V2_SLO_MAX_FD` (default `1024`)
+- `PREDATOR_V2_SLO_MAX_RSS_MB` (default `1024`)
+- `PREDATOR_V2_SLO_MAX_BREAKER_RATIO` (default `0.5`)

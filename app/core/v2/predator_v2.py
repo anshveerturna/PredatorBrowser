@@ -384,6 +384,28 @@ class PredatorEngineV2:
         records = await self._audit.list_records(tenant_id=tenant_id, workflow_id=workflow_id)
         return [record.to_dict() for record in records]
 
+    async def get_structured_state(
+        self,
+        tenant_id: str,
+        workflow_id: str,
+        policy: SecurityPolicy,
+    ) -> dict[str, Any]:
+        session = await self._sessions.get_or_create_session(
+            tenant_id=tenant_id,
+            workflow_id=workflow_id,
+            policy=policy,
+        )
+
+        current_url = session.page.url or "about:blank"
+        if current_url != "about:blank":
+            decision = session.security_layer.evaluate_navigation(current_url)
+            if not decision.allowed:
+                raise RuntimeError(decision.code)
+
+        extractor = StructuredStateExtractor(session.page, session.network_observer)
+        state = await extractor.extract(prev_state_id=None, downloads=())
+        return state.to_model_dict()
+
     async def open_tab(
         self,
         tenant_id: str,
