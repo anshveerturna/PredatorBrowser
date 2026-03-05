@@ -63,3 +63,27 @@ def test_local_observe_ranks_matching_element():
 
     assert candidates
     assert candidates[0].selector == "#add-to-cart"
+
+
+def test_resilient_perception_falls_back_on_primary_error():
+    import asyncio
+
+    from app.core.v2.perception import ActionCandidate, ResilientPerceptionAdapter
+
+    class BadPrimary:
+        async def observe(self, intent, page, state):
+            raise RuntimeError("boom")
+
+        async def extract(self, instruction, page):
+            raise RuntimeError("boom")
+
+    class GoodFallback:
+        async def observe(self, intent, page, state):
+            return [ActionCandidate("fallback", "click", "#ok", 0.5, {})]
+
+        async def extract(self, instruction, page):
+            return {"ok": True}
+
+    adapter = ResilientPerceptionAdapter(primary=BadPrimary(), fallback=GoodFallback())
+    items = asyncio.run(adapter.observe(intent="x", page=None, state=None))
+    assert items[0].selector == "#ok"

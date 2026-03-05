@@ -114,4 +114,4 @@ Set `PREDATOR_STAGEHAND_ENDPOINT` to a sidecar service that exposes `/observe` a
 - Disallowed in this architecture: Stagehand execution (`act`, `agent`).
 - Deterministic execution remains in Predator action contracts.
 
-If endpoint is unset, Predator uses a local token-efficient perception fallback adapter.
+If endpoint is unset, Predator uses a local token-efficient perception fallback adapter. If Stagehand sidecar calls fail at runtime, Predator automatically falls back to local perception so deterministic execution can continue.

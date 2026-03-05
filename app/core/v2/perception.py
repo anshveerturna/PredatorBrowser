@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 from dataclasses import dataclass
@@ -108,7 +107,7 @@ class StagehandHttpPerceptionAdapter:
         }
         timeout = aiohttp.ClientTimeout(total=self._timeout_s)
         async with aiohttp.ClientSession(timeout=timeout, headers=self._headers()) as session:
-            async with session.post(f"{self._endpoint}/observe", data=json.dumps(payload)) as response:
+            async with session.post(f"{self._endpoint}/observe", json=payload) as response:
                 response.raise_for_status()
                 body = await response.json()
         items = body.get("candidates", [])
@@ -127,17 +126,40 @@ class StagehandHttpPerceptionAdapter:
         payload = {"instruction": instruction, "url": page.url}
         timeout = aiohttp.ClientTimeout(total=self._timeout_s)
         async with aiohttp.ClientSession(timeout=timeout, headers=self._headers()) as session:
-            async with session.post(f"{self._endpoint}/extract", data=json.dumps(payload)) as response:
+            async with session.post(f"{self._endpoint}/extract", json=payload) as response:
                 response.raise_for_status()
                 return dict(await response.json())
 
 
+
+class ResilientPerceptionAdapter:
+    """Use Stagehand adapter when available; fall back to local perception on failures."""
+
+    def __init__(self, primary: PerceptionAdapter, fallback: PerceptionAdapter) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    async def observe(self, intent: str, page: Page, state: StructuredState) -> list[ActionCandidate]:
+        try:
+            return await self._primary.observe(intent=intent, page=page, state=state)
+        except Exception:
+            return await self._fallback.observe(intent=intent, page=page, state=state)
+
+    async def extract(self, instruction: str, page: Page) -> dict[str, Any]:
+        try:
+            return await self._primary.extract(instruction=instruction, page=page)
+        except Exception:
+            return await self._fallback.extract(instruction=instruction, page=page)
+
+
 def build_perception_adapter() -> PerceptionAdapter:
     endpoint = os.getenv("PREDATOR_STAGEHAND_ENDPOINT", "").strip()
+    fallback = LocalPerceptionAdapter()
     if endpoint:
-        return StagehandHttpPerceptionAdapter(
+        primary = StagehandHttpPerceptionAdapter(
             endpoint=endpoint,
             api_key=os.getenv("PREDATOR_STAGEHAND_API_KEY"),
             timeout_s=float(os.getenv("PREDATOR_STAGEHAND_TIMEOUT_S", "15")),
         )
-    return LocalPerceptionAdapter()
+        return ResilientPerceptionAdapter(primary=primary, fallback=fallback)
+    return fallback

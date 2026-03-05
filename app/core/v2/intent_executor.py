@@ -68,6 +68,21 @@ class IntentExecutor:
             },
         )
 
+    async def _build_state(self, tenant_id: str, workflow_id: str, policy: SecurityPolicy) -> Any:
+        # Prime workflow session through deterministic engine path first, preserving
+        # quota/security/circuit-breaker controls.
+        pre_contract = ActionContract(
+            workflow_id=workflow_id,
+            run_id="intent-bootstrap",
+            step_index=0,
+            intent="intent bootstrap",
+            action_spec=ActionSpec(action_type=ActionType.WAIT_ONLY),
+        )
+        await self._engine.execute_contract(tenant_id, workflow_id, policy, pre_contract)
+        session = self._engine._sessions.get_session(workflow_id)  # noqa: SLF001
+        extractor = StructuredStateExtractor(session.page, session.network_observer)
+        return session, await extractor.extract(prev_state_id=None, downloads=())
+
     async def execute_intent(
         self,
         tenant_id: str,
@@ -79,26 +94,21 @@ class IntentExecutor:
         type_text: str | None = None,
         environment: str = "default",
     ) -> dict[str, Any]:
-        session = await self._engine._sessions.get_or_create_session(  # noqa: SLF001
-            tenant_id=tenant_id,
-            workflow_id=workflow_id,
-            policy=policy,
-        )
-        extractor = StructuredStateExtractor(session.page, session.network_observer)
-        state = await extractor.extract(prev_state_id=None, downloads=())
+        session, state = await self._build_state(tenant_id=tenant_id, workflow_id=workflow_id, policy=policy)
         cache_key = WorkflowCacheKey(instruction=intent, start_url=state.url, environment=environment)
 
         cached_contract = self._cache.get(cache_key, cache_version=self._cache_version)
         if cached_contract is not None:
+            action_type = ActionType(cached_contract["action_spec"]["action_type"])
             contract = ActionContract(
                 workflow_id=workflow_id,
                 run_id=run_id,
                 step_index=step_index,
                 intent=intent,
                 action_spec=ActionSpec(
-                    action_type=ActionType(cached_contract["action_spec"]["action_type"]),
+                    action_type=action_type,
                     selector=cached_contract["action_spec"].get("selector"),
-                    text=type_text if cached_contract["action_spec"]["action_type"] == ActionType.TYPE.value else None,
+                    text=type_text if action_type == ActionType.TYPE else None,
                 ),
                 metadata={"cache_hit": True, "cache_key": cache_key.digest()},
             )
@@ -117,7 +127,7 @@ class IntentExecutor:
             }
 
         selected = candidates[0]
-        contract = self._candidate_to_contract(
+        selected_contract = self._candidate_to_contract(
             workflow_id=workflow_id,
             run_id=run_id,
             step_index=step_index,
@@ -125,14 +135,14 @@ class IntentExecutor:
             candidate=selected,
             type_text=type_text,
         )
-        result = await self._engine.execute_contract(tenant_id, workflow_id, policy, contract)
+        result = await self._engine.execute_contract(tenant_id, workflow_id, policy, selected_contract)
 
         if not result.success and len(candidates) > 1:
-            for fallback in candidates[1:4]:
+            for offset, fallback in enumerate(candidates[1:4], start=1):
                 fallback_contract = self._candidate_to_contract(
                     workflow_id=workflow_id,
                     run_id=run_id,
-                    step_index=step_index + 1,
+                    step_index=step_index + offset,
                     intent=f"{intent} (fallback)",
                     candidate=fallback,
                     type_text=type_text,
@@ -140,6 +150,7 @@ class IntentExecutor:
                 result = await self._engine.execute_contract(tenant_id, workflow_id, policy, fallback_contract)
                 if result.success:
                     selected = fallback
+                    selected_contract = fallback_contract
                     break
 
         if result.success:
@@ -147,7 +158,7 @@ class IntentExecutor:
                 cache_key,
                 {
                     "action_spec": {
-                        "action_type": contract.action_spec.action_type.value,
+                        "action_type": selected_contract.action_spec.action_type.value,
                         "selector": selected.selector,
                     }
                 },
@@ -157,6 +168,7 @@ class IntentExecutor:
         return {
             "mode": "perception",
             "selected": asdict(selected),
+            "candidates": [asdict(item) for item in candidates[:5]],
             "candidate_count": len(candidates),
             "cache_key": cache_key.digest(),
             "result": result.to_dict(),
