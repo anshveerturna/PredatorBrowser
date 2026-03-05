@@ -12,7 +12,10 @@ from app.core.v2.audit_trail import AuditTrail
 from app.core.v2.control_plane_store import ControlPlaneStore
 from app.core.v2.contracts import ActionContract, ActionExecutionResult
 from app.core.v2.delta_state_tracker import DeltaStateTracker
+from app.core.v2.intent_cache import IntentWorkflowCache
+from app.core.v2.intent_executor import IntentExecutor
 from app.core.v2.navigator import Navigator
+from app.core.v2.perception import build_perception_adapter
 from app.core.v2.quota_manager import QuotaManager, TenantQuota
 from app.core.v2.resilience import DomainCircuitBreaker, HealthMonitor
 from app.core.v2.security_layer import SecurityPolicy
@@ -53,6 +56,12 @@ class PredatorEngineV2:
         self._validator = ActionContractValidator()
         self._wait_chaos_policy = wait_chaos_policy
         self._telemetry_sink = telemetry_sink or JsonlTelemetrySink(root_dir=telemetry_dir)
+        self._intent_executor = IntentExecutor(
+            engine=self,
+            perception=build_perception_adapter(),
+            cache=IntentWorkflowCache(db_path=f"{control_db_path}.intent_cache.db"),
+            cache_version=1,
+        )
         self._ledger: dict[str, ActionExecutionResult] = {}
         self._lock = asyncio.Lock()
 
@@ -446,6 +455,28 @@ class PredatorEngineV2:
 
     async def close_workflow_session(self, workflow_id: str) -> None:
         await self._sessions.close_session(workflow_id)
+
+    async def execute_intent(
+        self,
+        tenant_id: str,
+        workflow_id: str,
+        policy: SecurityPolicy,
+        run_id: str,
+        step_index: int,
+        intent: str,
+        type_text: str | None = None,
+        environment: str = "default",
+    ) -> dict[str, Any]:
+        return await self._intent_executor.execute_intent(
+            tenant_id=tenant_id,
+            workflow_id=workflow_id,
+            policy=policy,
+            run_id=run_id,
+            step_index=step_index,
+            intent=intent,
+            type_text=type_text,
+            environment=environment,
+        )
 
     def get_health(self) -> dict[str, Any]:
         snapshot = self._breaker.snapshot()

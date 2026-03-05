@@ -31,6 +31,8 @@ from app.core.v2.telemetry_sink import JsonlTelemetrySink, NullTelemetrySink, Te
 from app.core.v2.temporal_activity import ActivityRequest, PredatorTemporalActivity
 from app.core.v2.token_budget import ComponentTokenBudgets
 from app.core.v2.wait_manager import ChaosPolicy
+from app.core.v2.intent_cache import IntentWorkflowCache, WorkflowCacheKey
+from app.core.v2.intent_executor import IntentExecutor
 
 __all__ = [
     "ActionContract",
@@ -59,6 +61,9 @@ __all__ = [
     "NullTelemetrySink",
     "ComponentTokenBudgets",
     "ChaosPolicy",
+    "IntentWorkflowCache",
+    "WorkflowCacheKey",
+    "IntentExecutor",
     "WorkClass",
     "classify_work_class",
     "TimeoutPolicy",

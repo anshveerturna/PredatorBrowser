@@ -92,3 +92,32 @@ This document defines the runtime boundaries for Predator v2.
 - `PREDATOR_V2_SLO_MAX_FD` (default `1024`)
 - `PREDATOR_V2_SLO_MAX_RSS_MB` (default `1024`)
 - `PREDATOR_V2_SLO_MAX_BREAKER_RATIO` (default `0.5`)
+
+
+## Intent pipeline (Stagehand-style perception + deterministic execution)
+
+Predator v2 now supports a high-level intent tool (`v2_execute_intent`) that keeps execution deterministic while allowing LLM-friendly discovery.
+
+Pipeline:
+1. Structured state extraction from the live page.
+2. Perception adapter returns action candidates (`description`, `method`, `selector`, `confidence`).
+3. Candidate selection/ranking.
+4. Deterministic `ActionContract` execution via Playwright primitives.
+5. Verification and audit trail.
+6. Workflow cache keyed by instruction + starting URL + environment, storing canonical `ActionContract` payloads for deterministic replay.
+
+### Stagehand integration mode
+
+Set `PREDATOR_STAGEHAND_ENDPOINT` to a sidecar service that exposes `/observe` and `/extract` and internally uses Stagehand `observe()` / `extract()`.
+
+- Allowed Stagehand capabilities: perception (`observe`, `extract`).
+- Disallowed in this architecture: Stagehand execution (`act`, `agent`).
+- Deterministic execution remains in Predator action contracts.
+
+If endpoint is unset, Predator uses a local token-efficient perception fallback adapter. If Stagehand sidecar calls fail at runtime, Predator automatically falls back to local perception so deterministic execution can continue.
+
+
+Cache invalidation triggers:
+- cached action verification failure during replay
+- selector no longer present in current structured state
+- URL/elements state-hash mismatch (page structure drift)
