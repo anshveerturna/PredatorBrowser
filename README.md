@@ -281,6 +281,7 @@ This repository now includes a `v2` execution stack under `app/core/v2` with:
 - prompt-injection filtering on model-visible extracted text
 - `PredatorTemporalActivity` adapter for Temporal Activity execution
 - dedicated v2 MCP server: `python -m app.server_v2`
+- perception-first intent tool (`v2_execute_intent`) with Stagehand-compatible observe/extract adapter and deterministic execution
 - optional Temporal worker entrypoint: `python -m app.temporal_worker_v2`
 
 See `docs/predator_v2.md` for module boundaries and Temporal integration notes.

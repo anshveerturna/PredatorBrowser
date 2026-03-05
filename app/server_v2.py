@@ -169,6 +169,27 @@ server = Server("predator-browser-v2")
 async def list_tools() -> list[Tool]:
     return [
         Tool(
+            name="v2_execute_intent",
+            description=(
+                "Perception + deterministic execution pipeline. Uses Stagehand-compatible "
+                "observe/extract perception when configured, then executes deterministic contracts."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tenant_id": {"type": "string"},
+                    "workflow_id": {"type": "string"},
+                    "policy": {"type": "object"},
+                    "run_id": {"type": "string"},
+                    "step_index": {"type": "integer"},
+                    "intent": {"type": "string"},
+                    "type_text": {"type": "string"},
+                    "environment": {"type": "string"},
+                },
+                "required": ["tenant_id", "workflow_id", "policy", "run_id", "step_index", "intent"],
+            },
+        ),
+        Tool(
             name="v2_execute_action",
             description="Execute a deterministic ActionContract in Predator v2.",
             inputSchema={
@@ -277,6 +298,19 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 contract=_to_contract(arguments["contract"]),
             )
             return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+
+        if name == "v2_execute_intent":
+            result = await engine.execute_intent(
+                tenant_id=arguments["tenant_id"],
+                workflow_id=arguments["workflow_id"],
+                policy=_to_policy(arguments["policy"]),
+                run_id=arguments["run_id"],
+                step_index=int(arguments["step_index"]),
+                intent=arguments["intent"],
+                type_text=arguments.get("type_text"),
+                environment=arguments.get("environment", "default"),
+            )
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         if name == "v2_verify_audit_chain":
             ok, reason = await engine.verify_audit_chain(
